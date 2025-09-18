@@ -1,6 +1,22 @@
 from flask import Flask
-app = Flask(__name__)
 
-@app.route("/")
-def say_hello():
-    return "<h1>Hello, World!</h1>"
+from api.config import config
+from api.routes import routes
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(config)
+
+    from api.models import db
+    db.init_app(app)
+
+    from api.schemas import ma
+    ma.init_app(app)
+
+    app.register_blueprint(routes)
+
+    return app
+
+if __name__ == '__main__':
+    app = create_app()
+    app.run()
