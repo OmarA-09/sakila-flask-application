@@ -2,4 +2,4 @@ venv/
 .venv/
 .idea/
 __pycache__/
-api/config.py
+/api/config.py

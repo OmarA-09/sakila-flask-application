@@ -1,9 +1,11 @@
 from api.models.actor import Actor
 from api.schemas import ma
+from marshmallow import fields
 
-class ActorSchema(ma.ModelSchema):
+class ActorSchema(ma.SQLAlchemyAutoSchema):
     class Meta:
         model = Actor
+    last_update = fields.DateTime(dump_only=True)
 
 # instantiate
 actor_schema = ActorSchema()
