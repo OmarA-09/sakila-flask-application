@@ -19,16 +19,23 @@ def read_film(film_id):
     if film is None:
         return {"error": "Film not found"}, 404
     return film_schema.dump(film)
-'''
 
-@actors_router.post('/')
-def create_actor():
-    actor_data = request.json   # Get the parsed request body
+@films_router.post('/')
+def create_film():
+    film_data = request.json
 
     try:
-        actor_schema.load(actor_data)   # Validate against the schema
+        film_schema.load(film_data)
     except ValidationError as err:
-        return jsonify(err.messages), 400
+        return {"error": err.messages}, 400
+
+    film = Film(**film_data)
+    db.session.add(film)
+    db.session.commit()
+
+    return film_schema.dump(film), 201
+'''
+
 
     actor = Actor(**actor_data)         # Create a new actor model
     db.session.add(actor)               # Insert the record

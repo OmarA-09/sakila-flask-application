@@ -15,7 +15,7 @@ class Film(db.Model):
 
     rating = db.Column(
         db.Enum("G", "PG", "PG-13", "R", "NC-17", name="rating_enum"),
-        nullable=True
+        nullable=False
     )
 
     # treat as string CSV for MVP - handle SET later
