@@ -17,6 +17,8 @@ def read_all_actors():
 @actors_router.get('/<actor_id>')
 def read_actor(actor_id):
     actor = Actor.query.get(actor_id)
+    if actor is None:
+        return {"error": "Actor not found"}, 404
     return actor_schema.dump(actor)
 
 @actors_router.post('/')
