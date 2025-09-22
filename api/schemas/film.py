@@ -5,6 +5,7 @@ from marshmallow import fields, ValidationError
 
 ALLOWED_FEATURES = {"Trailers", "Commentaries", "Deleted Scenes", "Behind the Scenes"}
 
+# ensures price format
 def validate_price(value):
     try:
         s = str(value)
@@ -15,7 +16,7 @@ def validate_price(value):
         if len(decimals) > 2:
             raise ValidationError("Must have at most 2 decimal places.")
 
-
+# ensures csv format
 def validate_special_features_csv(value):
     if not value:
         return
