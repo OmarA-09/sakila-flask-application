@@ -15,6 +15,18 @@ from api.schemas.actor import actors_schema
 # Bluerprint gets inserted into flask app
 films_router = Blueprint('films', __name__, url_prefix='/films')
 
+def film_to_hateoas(film):
+    return {
+        **film_schema.dump(film),
+        "_links": {
+            "self": f"/api/films/{film.film_id}",
+            "actors": f"/api/films/{film.film_id}/actors",
+            "update": f"/api/films/{film.film_id}",
+            "delete": f"/api/films/{film.film_id}",
+            "language": f"/api/languages/{film.language_id}"
+        }
+    }
+
 @films_router.get("")
 def read_all_films():
     query = Film.query
@@ -46,26 +58,19 @@ def read_all_films():
     total_pages = math.ceil(total / page_size) if page_size > 0 else 1
 
     # Dump + enrich each film with language link
-    film_items = []
-    for film in films:
-        film_data = film_schema.dump(film)
-        film_data["_links"] = {
-            "self": f"/api/films/{film.film_id}",
-            "language": f"/api/languages/{film.language_id}"
-        }
-        film_items.append(film_data)
+    film_items = [film_to_hateoas(f) for f in films]
 
-    # Hypermedia controls
     base_url = "/api/films"
     links = {
         "self": f"{base_url}?page={page}&page_size={page_size}",
         "first": f"{base_url}?page=1&page_size={page_size}",
-        "last": f"{base_url}?page={total_pages}&page_size={page_size}"
+        "last": f"{base_url}?page={total_pages}&page_size={page_size}",
+        "create": f"{base_url}"
     }
     if page > 1:
-        links["prev"] = f"{base_url}?page={page-1}&page_size={page_size}"
+        links["prev"] = f"{base_url}?page={page - 1}&page_size={page_size}"
     if page < total_pages:
-        links["next"] = f"{base_url}?page={page+1}&page_size={page_size}"
+        links["next"] = f"{base_url}?page={page + 1}&page_size={page_size}"
 
     return {
         "count": total,
@@ -81,16 +86,7 @@ def read_film(film_id):
     film = Film.query.get(film_id)
     if film is None:
         return {"error": "Film not found"}, 404
-
-    film_data = film_schema.dump(film)
-
-    # Add hypermedia link for language
-    film_data["_links"] = {
-        "self": f"/api/films/{film_id}",
-        "language": f"/api/languages/{film.language_id}"
-    }
-
-    return film_data
+    return film_to_hateoas(film)
 
 @films_router.get("/<film_id>/actors")
 def read_film_actors(film_id):
@@ -121,7 +117,7 @@ def create_film():
     db.session.add(film)
     db.session.commit()
 
-    return film_schema.dump(film), 201
+    return film_to_hateoas(film), 201
 
 @films_router.delete('/<film_id>')
 def delete_film(film_id):
@@ -137,8 +133,11 @@ def delete_film(film_id):
         return {
             "error": f"Film {film_id} cannot be deleted because it is referenced in other records."
         }, 409
-    
-    return film_schema.dump(film), 204
+
+    return {
+        "message": f"Film {film_id} deleted",
+        "_links": {"films": "/api/films"}
+    }, 204
 
 def update_film_helper(film_id, film_data, partial):
     film = Film.query.get(film_id)
@@ -165,7 +164,7 @@ def update_film_helper(film_id, film_data, partial):
                 film.actors.append(actor)
 
     db.session.commit()
-    return film_schema.dump(film), 200
+    return film_to_hateoas(film), 200
 
 @films_router.put("/<film_id>")
 def update_film(film_id):
