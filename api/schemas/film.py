@@ -40,6 +40,7 @@ class FilmSchema(ma.SQLAlchemyAutoSchema):
 
     # CSV string that must only contain allowed options
     special_features = fields.String(validate=validate_special_features_csv)
+    actors = fields.List(fields.Int(), required=False)
 
 film_schema = FilmSchema()
 films_schema = FilmSchema(many=True)
