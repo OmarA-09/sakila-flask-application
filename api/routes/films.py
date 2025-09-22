@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 
 from api.models import db
 from api.models.actor import Actor
-from api.models.film_actor import FilmActor
+
 from api.models.film import Film
 
 from api.schemas.film import film_schema, films_schema
@@ -52,21 +52,11 @@ def read_film(film_id):
 
 @films_router.get("/<film_id>/actors")
 def read_film_actors(film_id):
-    # check film exists first
     film = Film.query.get(film_id)
     if film is None:
         return {"error": "Film not found"}, 404
 
-    # find all actor_ids linked in film_actor
-    film_actors = FilmActor.query.filter_by(film_id=film_id).all()
-    actor_ids = [film_actor.actor_id for film_actor in film_actors]
-
-    if not actor_ids:
-        return {"actors": []}, 200
-
-    # fetch actors
-    actors = Actor.query.filter(Actor.actor_id.in_(actor_ids)).all()
-    return actors_schema.dump(actors), 200
+    return actors_schema.dump(film.actors), 200
 
 @films_router.post('/')
 def create_film():
@@ -81,18 +71,12 @@ def create_film():
     film = Film(**film_data)
     db.session.add(film)
 
-    db.session.flush()  # assign film_id before commit so we can get film.film_id for filmActor
-
-    # manually link actors via FilmActor rows
     for actor_id in actor_ids:
         actor = Actor.query.get(actor_id)
         if actor:
-            db.session.add(
-                FilmActor(
-                    film_id=film.film_id, actor_id=actor.actor_id
-                )
-            )
+            film.actors.append(actor)
 
+    db.session.add(film)
     db.session.commit()
 
     return film_schema.dump(film), 201
@@ -114,44 +98,38 @@ def delete_film(film_id):
     
     return film_schema.dump(film), 204
 
-@films_router.put("/<film_id>")
-def update_film_full_name(film_id):
+def update_film_helper(film_id, film_data, partial):
     film = Film.query.get(film_id)
     if film is None:
         return {"error": "Film not found"}, 404
 
-    film_data = request.json
+    actor_ids = film_data.pop("actors", None)
+
     try:
-        # validate incoming JSON
-        film_schema.load(film_data, partial=False)  # full object required
-    except ValidationError as err:
-        return jsonify(err.messages), 400
-
-    # overwrite fields
-    for key, value in film_data.items():
-        if hasattr(film, key):
-            setattr(film, key, value)
-
-    db.session.commit()
-    return film_schema.dump(film), 200
-
-@films_router.patch("/<film_id>")
-def partial_update_film(film_id):
-    film = Film.query.get(film_id)
-    if film is None:
-        return {"error": "Film not found"}, 404
-
-    film_data = request.json
-    try:
-        # only provided fields validated
-        film_schema.load(film_data, partial=True)
+        film_schema.load(film_data, partial=partial)
     except ValidationError as err:
         return {"error": err.messages}, 400
 
-    # update only given fields
+    # update fields + actors
     for key, value in film_data.items():
         if hasattr(film, key):
             setattr(film, key, value)
 
+    if actor_ids is not None:
+        film.actors.clear()
+        for actor_id in actor_ids:
+            actor = Actor.query.get(actor_id)
+            if actor:
+                film.actors.append(actor)
+
     db.session.commit()
     return film_schema.dump(film), 200
+
+@films_router.put("/<film_id>")
+def update_film(film_id):
+    return update_film_helper(film_id, request.json, partial=False)
+
+@films_router.patch("/<film_id>")
+def partial_update_film(film_id):
+    return update_film_helper(film_id, request.json, partial=True)
+

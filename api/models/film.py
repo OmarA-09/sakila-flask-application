@@ -1,5 +1,4 @@
-from api.models import db
-from datetime import datetime
+from api.models import db, film_actor
 
 class Film(db.Model):
     film_id = db.Column(db.SmallInteger, primary_key=True)
@@ -27,4 +26,7 @@ class Film(db.Model):
         server_onupdate=db.func.now(),
         nullable=False
     )
+
+    actors = db.relationship("Actor", secondary=film_actor, back_populates="films")
+
 

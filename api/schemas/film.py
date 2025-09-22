@@ -1,5 +1,6 @@
 from api.models.film import Film
 from api.schemas import ma
+from api.schemas.actor import ActorSchema
 from marshmallow import fields, ValidationError
 
 ALLOWED_FEATURES = {"Trailers", "Commentaries", "Deleted Scenes", "Behind the Scenes"}
@@ -31,6 +32,7 @@ def validate_special_features_csv(value):
 class FilmSchema(ma.SQLAlchemyAutoSchema):
     class Meta:
         model = Film
+        include_relationships = True
 
     film_id = fields.Int(dump_only=True)
     last_update = fields.DateTime(dump_only=True)
@@ -40,7 +42,9 @@ class FilmSchema(ma.SQLAlchemyAutoSchema):
 
     # CSV string that must only contain allowed options
     special_features = fields.String(validate=validate_special_features_csv)
-    actors = fields.List(fields.Int(), required=False)
+
+    actors = fields.Nested(ActorSchema, many=True, dump_only=True)
+
 
 film_schema = FilmSchema()
 films_schema = FilmSchema(many=True)
