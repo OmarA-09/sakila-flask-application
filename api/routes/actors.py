@@ -36,7 +36,7 @@ def create_actor():
 
     return actor_schema.dump(actor), 201     # Serialize the created actor
 
-@actors_router.delete("/<int:actor_id>")
+@actors_router.delete("/<actor_id>")
 def delete_actor(actor_id):
     actor = Actor.query.get(actor_id)
     if actor is None:
@@ -47,7 +47,7 @@ def delete_actor(actor_id):
 
     return {"message": f"Actor {actor_id} deleted successfully"}, 204
 
-@actors_router.put("/<int:actor_id>")
+@actors_router.put("/<actor_id>")
 def update_actor_full_name(actor_id):
     actor = Actor.query.get(actor_id)
     if actor is None:
@@ -67,7 +67,7 @@ def update_actor_full_name(actor_id):
     db.session.commit()
     return actor_schema.dump(actor), 200
 
-@actors_router.patch("/<int:actor_id>")
+@actors_router.patch("/<actor_id>")
 def partial_update_actor(actor_id):
     actor = Actor.query.get(actor_id) # retrieve actor object
     if actor is None:

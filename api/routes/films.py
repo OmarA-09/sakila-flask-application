@@ -1,3 +1,5 @@
+import math
+
 from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +15,7 @@ from api.schemas.actor import actors_schema
 # Bluerprint gets inserted into flask app
 films_router = Blueprint('films', __name__, url_prefix='/films')
 
-@films_router.get('/')
+@films_router.get("")
 def read_all_films():
     query = Film.query
 
@@ -36,19 +38,59 @@ def read_all_films():
         query = query.order_by(column)
 
     # Pagination
-    limit = request.args.get("limit", type=int, default=20)
-    offset = request.args.get("offset", type=int, default=0)
-    films = query.limit(limit).offset(offset).all()
+    page = request.args.get("page", type=int, default=1)
+    page_size = request.args.get("page_size", type=int, default=20)
 
-    return films_schema.dump(films)
+    total = query.count()
+    films = query.limit(page_size).offset((page - 1) * page_size).all()
+    total_pages = math.ceil(total / page_size) if page_size > 0 else 1
 
+    # Dump + enrich each film with language link
+    film_items = []
+    for film in films:
+        film_data = film_schema.dump(film)
+        film_data["_links"] = {
+            "self": f"/api/films/{film.film_id}",
+            "language": f"/api/languages/{film.language_id}"
+        }
+        film_items.append(film_data)
+
+    # Hypermedia controls
+    base_url = "/api/films"
+    links = {
+        "self": f"{base_url}?page={page}&page_size={page_size}",
+        "first": f"{base_url}?page=1&page_size={page_size}",
+        "last": f"{base_url}?page={total_pages}&page_size={page_size}"
+    }
+    if page > 1:
+        links["prev"] = f"{base_url}?page={page-1}&page_size={page_size}"
+    if page < total_pages:
+        links["next"] = f"{base_url}?page={page+1}&page_size={page_size}"
+
+    return {
+        "count": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "items": film_items,
+        "_links": links
+    }
 
 @films_router.get('/<film_id>')
 def read_film(film_id):
     film = Film.query.get(film_id)
     if film is None:
         return {"error": "Film not found"}, 404
-    return film_schema.dump(film)
+
+    film_data = film_schema.dump(film)
+
+    # Add hypermedia link for language
+    film_data["_links"] = {
+        "self": f"/api/films/{film_id}",
+        "language": f"/api/languages/{film.language_id}"
+    }
+
+    return film_data
 
 @films_router.get("/<film_id>/actors")
 def read_film_actors(film_id):
