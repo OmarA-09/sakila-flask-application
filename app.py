@@ -1,11 +1,15 @@
 from flask import Flask
+from flask_cors import CORS
 
 from api.config import config
 from api.routes import routes
 
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(config)
+
+    CORS(app, origins=["http://localhost:5173"])
 
     from api.models import db
     db.init_app(app)

@@ -3,3 +3,4 @@ mysqlclient
 flask-sqlalchemy
 flask-marshmallow
 marshmallow-sqlalchemy
+flask-cors
