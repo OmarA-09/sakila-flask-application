@@ -192,76 +192,51 @@ from sklearn.preprocessing import OneHotEncoder
 @films_router.post('/train-clusters')
 def train_and_save_clusters():
     films = Film.query.all()
+    train_films = [f for f in films if f.film_id <= 900]
+    test_films = [f for f in films if f.film_id > 900]
 
-    # Prepare categorical features
-    titles = [f.title for f in films]
-    ratings = [f.rating for f in films]
-
-    # One-hot encode titles and ratings
+    train_titles = [f.title for f in train_films]
+    train_ratings = [f.rating for f in train_films]
     title_ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
     rating_ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
-    title_encoded = title_ohe.fit_transform(np.array(titles).reshape(-1, 1))
-    rating_encoded = rating_ohe.fit_transform(np.array(ratings).reshape(-1, 1))
+    title_train_enc = title_ohe.fit_transform(np.array(train_titles).reshape(-1, 1))
+    rating_train_enc = rating_ohe.fit_transform(np.array(train_ratings).reshape(-1, 1))
 
-    # Combine all features
-    features = np.hstack([
-        np.array([[f.release_year, f.rental_duration, f.rental_rate, f.length, f.replacement_cost] for f in films]),
-        title_encoded,
-        rating_encoded
+    train_features = np.hstack([
+        np.array([[f.release_year, f.rental_duration, f.rental_rate, f.length, f.replacement_cost] for f in train_films]),
+        title_train_enc,
+        rating_train_enc
     ])
 
-    kmeans = KMeans(n_clusters=5, random_state=42)
-    labels = kmeans.fit_predict(features)
+    kmeans = KMeans(n_clusters=3, random_state=42)
+    labels = kmeans.fit_predict(train_features)
     joblib.dump(kmeans, "api/ml-models/film_kmeans_model.joblib")
     joblib.dump(title_ohe, "api/ml-models/title_ohe.joblib")
     joblib.dump(rating_ohe, "api/ml-models/rating_ohe.joblib")
 
-    # PCA for visualization
+    # PCA and plot for training data
     pca = PCA(n_components=2)
-    X_2d = pca.fit_transform(features)
-    pca_loadings = pca.components_
-    pc1_importances = np.abs(pca_loadings[0])
-    pc2_importances = np.abs(pca_loadings[1])
-    pc1_top_idx = np.argmax(pc1_importances)
-    pc2_top_idx = np.argmax(pc2_importances)
-
-    feature_names = (
-        ["release_year", "rental_duration", "rental_rate", "length", "replacement_cost"] +
-        [f"title_{cat}" for cat in title_ohe.categories_[0]] +
-        [f"rating_{cat}" for cat in rating_ohe.categories_[0]]
-    )
-    pc1_feature = feature_names[pc1_top_idx]
-    pc2_feature = feature_names[pc2_top_idx]
-
+    X_2d = pca.fit_transform(train_features)
     plt.figure(figsize=(8,6))
     scatter = plt.scatter(X_2d[:,0], X_2d[:,1], c=labels, cmap='viridis')
-    plt.xlabel(f'PCA 1:  {pc1_feature}')
-    plt.ylabel(f'PCA 2:  {pc2_feature}')
-    plt.title("Film Cluster Visualization")
+    plt.xlabel('PCA 1')
+    plt.ylabel('PCA 2')
+    plt.title("Train Film Cluster Visualization")
     plt.colorbar(scatter, label='Cluster')
-
     img_folder = os.path.join(os.path.dirname(__file__), "plt-images")
     os.makedirs(img_folder, exist_ok=True)
-    img_path = os.path.join(img_folder, "film_clusters.png")
+    img_path = os.path.join(img_folder, "film_clusters_train.png")
     plt.savefig(img_path, bbox_inches='tight')
     plt.close()
 
     return {
-        "message": "Model trained + cluster plot image saved.",
-        "n_films": len(films),
-        "cluster_plot": img_path,
-        "pca_main_features": {
-            "PCA1": {
-                "feature": pc1_feature,
-                "weight": float(pca_loadings[0][pc1_top_idx])
-            },
-            "PCA2": {
-                "feature": pc2_feature,
-                "weight": float(pca_loadings[1][pc2_top_idx])
-            }
-        }
+        "message": "Model trained on films 1-700 and saved.",
+        "n_train_films": len(train_films),
+        "n_test_films": len(test_films),
+        "train_cluster_plot": img_path
     }, 200
 
+# TODO: Ensure that the id passed is outside training data
 @films_router.get('/predict-cluster/<film_id>')
 def predict_film_cluster(film_id):
     film = Film.query.get(film_id)
@@ -327,4 +302,49 @@ def recommend_similar_films(film_id):
                 "title": f.title
             } for f in recommends
         ]
+    }, 200
+
+@films_router.get('/evaluate-clusters')
+def evaluate_clusters():
+    films = Film.query.all()
+    test_films = [f for f in films if f.film_id > 900]
+    title_ohe = joblib.load("api/ml-models/title_ohe.joblib")
+    rating_ohe = joblib.load("api/ml-models/rating_ohe.joblib")
+    kmeans = joblib.load("api/ml-models/film_kmeans_model.joblib")
+
+    test_titles = [f.title for f in test_films]
+    test_ratings = [f.rating for f in test_films]
+    title_test_enc = title_ohe.transform(np.array(test_titles).reshape(-1, 1))
+    rating_test_enc = rating_ohe.transform(np.array(test_ratings).reshape(-1, 1))
+
+    test_features = np.hstack([
+        np.array([[f.release_year, f.rental_duration, f.rental_rate, f.length, f.replacement_cost] for f in test_films]),
+        title_test_enc,
+        rating_test_enc
+    ])
+
+    test_labels = kmeans.predict(test_features)
+    from sklearn.metrics import silhouette_score
+    silhouette = silhouette_score(test_features, test_labels) if len(set(test_labels)) > 1 else None
+
+    # PCA and plot for test data
+    pca = PCA(n_components=2)
+    X_2d = pca.fit_transform(test_features)
+    plt.figure(figsize=(8,6))
+    scatter = plt.scatter(X_2d[:,0], X_2d[:,1], c=test_labels, cmap='viridis')
+    plt.xlabel('PCA 1')
+    plt.ylabel('PCA 2')
+    plt.title("Test Film Cluster Visualization")
+    plt.colorbar(scatter, label='Cluster')
+    img_folder = os.path.join(os.path.dirname(__file__), "plt-images")
+    os.makedirs(img_folder, exist_ok=True)
+    img_path = os.path.join(img_folder, "film_clusters_test.png")
+    plt.savefig(img_path, bbox_inches='tight')
+    plt.close()
+
+    return {
+        "message": "Model evaluated on test films (>700).",
+        "n_test_films": len(test_films),
+        "silhouette_score": silhouette,
+        "test_cluster_plot": img_path
     }, 200
