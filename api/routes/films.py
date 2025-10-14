@@ -187,51 +187,49 @@ import io
 import random
 import os
 
+from sklearn.preprocessing import OneHotEncoder
+
 @films_router.post('/train-clusters')
 def train_and_save_clusters():
     films = Film.query.all()
 
-    # Define features and names
-    feature_names = [
-        "release_year", "rental_duration", "rental_rate",
-        "length", "replacement_cost", "title_enc", "rating_enc"
-    ]
-    title_le = LabelEncoder()
-    rating_le = LabelEncoder()
+    # Prepare categorical features
     titles = [f.title for f in films]
     ratings = [f.rating for f in films]
-    title_num = title_le.fit_transform(titles)
-    rating_num = rating_le.fit_transform(ratings)
 
-    features = np.array([
-        [
-            f.release_year,
-            f.rental_duration,
-            f.rental_rate,
-            f.length,
-            f.replacement_cost,
-            title_num[i],
-            rating_num[i]
-        ]
-        for i, f in enumerate(films)
+    # One-hot encode titles and ratings
+    title_ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    rating_ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    title_encoded = title_ohe.fit_transform(np.array(titles).reshape(-1, 1))
+    rating_encoded = rating_ohe.fit_transform(np.array(ratings).reshape(-1, 1))
+
+    # Combine all features
+    features = np.hstack([
+        np.array([[f.release_year, f.rental_duration, f.rental_rate, f.length, f.replacement_cost] for f in films]),
+        title_encoded,
+        rating_encoded
     ])
 
     kmeans = KMeans(n_clusters=5, random_state=42)
     labels = kmeans.fit_predict(features)
-    joblib.dump(kmeans, "film_kmeans_model.joblib")
-    joblib.dump(title_le, "title_le.joblib")
-    joblib.dump(rating_le, "rating_le.joblib")
+    joblib.dump(kmeans, "api/ml-models/film_kmeans_model.joblib")
+    joblib.dump(title_ohe, "api/ml-models/title_ohe.joblib")
+    joblib.dump(rating_ohe, "api/ml-models/rating_ohe.joblib")
 
-    # PCA
+    # PCA for visualization
     pca = PCA(n_components=2)
     X_2d = pca.fit_transform(features)
-    # Find most important features for PCA 1 and PCA 2
     pca_loadings = pca.components_
     pc1_importances = np.abs(pca_loadings[0])
     pc2_importances = np.abs(pca_loadings[1])
     pc1_top_idx = np.argmax(pc1_importances)
     pc2_top_idx = np.argmax(pc2_importances)
 
+    feature_names = (
+        ["release_year", "rental_duration", "rental_rate", "length", "replacement_cost"] +
+        [f"title_{cat}" for cat in title_ohe.categories_[0]] +
+        [f"rating_{cat}" for cat in rating_ohe.categories_[0]]
+    )
     pc1_feature = feature_names[pc1_top_idx]
     pc2_feature = feature_names[pc2_top_idx]
 
@@ -248,7 +246,6 @@ def train_and_save_clusters():
     plt.savefig(img_path, bbox_inches='tight')
     plt.close()
 
-    # Also return actual loadings for full transparency
     return {
         "message": "Model trained + cluster plot image saved.",
         "n_films": len(films),
@@ -265,27 +262,20 @@ def train_and_save_clusters():
         }
     }, 200
 
-
 @films_router.get('/predict-cluster/<film_id>')
 def predict_film_cluster(film_id):
     film = Film.query.get(film_id)
     if film is None:
         return {"error": "Film not found"}, 404
-    kmeans = joblib.load("film_kmeans_model.joblib")
-    title_le = joblib.load("title_le.joblib")
-    rating_le = joblib.load("rating_le.joblib")
-    title_num = title_le.transform([film.title])[0]
-    rating_num = rating_le.transform([film.rating])[0]
-    feature = np.array([
-        [
-            film.release_year,
-            film.rental_duration,
-            film.rental_rate,
-            film.length,
-            film.replacement_cost,
-            title_num,
-            rating_num
-        ]
+    kmeans = joblib.load("api/ml-models/film_kmeans_model.joblib")
+    title_ohe = joblib.load("api/ml-models/title_ohe.joblib")
+    rating_ohe = joblib.load("api/ml-models/rating_ohe.joblib")
+    title_encoded = title_ohe.transform(np.array([film.title]).reshape(-1, 1))
+    rating_encoded = rating_ohe.transform(np.array([film.rating]).reshape(-1, 1))
+    feature = np.hstack([
+        np.array([[film.release_year, film.rental_duration, film.rental_rate, film.length, film.replacement_cost]]),
+        title_encoded,
+        rating_encoded
     ])
     cluster = int(kmeans.predict(feature)[0])
     return jsonify({
@@ -294,57 +284,37 @@ def predict_film_cluster(film_id):
         "cluster": cluster
     })
 
-
 @films_router.get('/recommend-like/<film_id>')
 def recommend_similar_films(film_id):
     film = Film.query.get(film_id)
     if film is None:
         return {"error": "Film not found"}, 404
 
-    # Load encoders and model
-    kmeans = joblib.load("film_kmeans_model.joblib")
-    title_le = joblib.load("title_le.joblib")
-    rating_le = joblib.load("rating_le.joblib")
-
-    title_num = title_le.transform([film.title])[0]  # extract scalar
-    rating_num = rating_le.transform([film.rating])[0]  # extract scalar
-
-    feature = np.array([[
-        film.release_year,
-        film.rental_duration,
-        film.rental_rate,
-        film.length,
-        film.replacement_cost,
-        title_num,
-        rating_num
-    ]])
-
+    kmeans = joblib.load("api/ml-models/film_kmeans_model.joblib")
+    title_ohe = joblib.load("api/ml-models/title_ohe.joblib")
+    rating_ohe = joblib.load("api/ml-models/rating_ohe.joblib")
+    title_encoded = title_ohe.transform(np.array([film.title]).reshape(-1, 1))
+    rating_encoded = rating_ohe.transform(np.array([film.rating]).reshape(-1, 1))
+    feature = np.hstack([
+        np.array([[film.release_year, film.rental_duration, film.rental_rate, film.length, film.replacement_cost]]),
+        title_encoded,
+        rating_encoded
+    ])
     cluster = int(kmeans.predict(feature)[0])
 
-    # Get all films and their clusters
     films = Film.query.all()
     titles_all = [f.title for f in films]
     ratings_all = [f.rating for f in films]
-    titles_num = title_le.transform(titles_all)
-    ratings_num = rating_le.transform(ratings_all)
-
-    features = np.array([
-        [
-            f.release_year,
-            f.rental_duration,
-            f.rental_rate,
-            f.length,
-            f.replacement_cost,
-            titles_num[i],
-            ratings_num[i]
-        ]
-        for i, f in enumerate(films)
+    title_encoded_all = title_ohe.transform(np.array(titles_all).reshape(-1, 1))
+    rating_encoded_all = rating_ohe.transform(np.array(ratings_all).reshape(-1, 1))
+    features = np.hstack([
+        np.array([[f.release_year, f.rental_duration, f.rental_rate, f.length, f.replacement_cost] for f in films]),
+        title_encoded_all,
+        rating_encoded_all
     ])
     clusters_all = kmeans.predict(features)
 
-    # Get films with the same cluster but different ID
     same_cluster_films = [f for i, f in enumerate(films) if clusters_all[i] == cluster and f.film_id != film.film_id]
-
     recommends = random.sample(same_cluster_films, min(5, len(same_cluster_films)))
 
     return {
