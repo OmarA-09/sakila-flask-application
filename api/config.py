@@ -11,10 +11,10 @@ class Config(object):
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 class ProdConfig(Config):
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URI')
+    SQLALCHEMY_DATABASE_URI = os.getenv('PROD_DATABASE_URI')
 
 class DevConfig(Config):
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URI')
+    SQLALCHEMY_DATABASE_URI = os.getenv('DEV_DATABASE_URI')
 
 match os.getenv('ENV'):
     case 'PRODUCTION':

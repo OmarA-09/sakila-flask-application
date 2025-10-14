@@ -1,6 +1,6 @@
 import math
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from marshmallow import ValidationError
 from sqlalchemy.exc import IntegrityError
 
@@ -174,3 +174,187 @@ def update_film(film_id):
 def partial_update_film(film_id):
     return update_film_helper(film_id, request.json, partial=True)
 
+# ML code
+import numpy as np
+import joblib
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import LabelEncoder
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+import io
+import random
+import os
+
+@films_router.post('/train-clusters')
+def train_and_save_clusters():
+    films = Film.query.all()
+
+    # Define features and names
+    feature_names = [
+        "release_year", "rental_duration", "rental_rate",
+        "length", "replacement_cost", "title_enc", "rating_enc"
+    ]
+    title_le = LabelEncoder()
+    rating_le = LabelEncoder()
+    titles = [f.title for f in films]
+    ratings = [f.rating for f in films]
+    title_num = title_le.fit_transform(titles)
+    rating_num = rating_le.fit_transform(ratings)
+
+    features = np.array([
+        [
+            f.release_year,
+            f.rental_duration,
+            f.rental_rate,
+            f.length,
+            f.replacement_cost,
+            title_num[i],
+            rating_num[i]
+        ]
+        for i, f in enumerate(films)
+    ])
+
+    kmeans = KMeans(n_clusters=5, random_state=42)
+    labels = kmeans.fit_predict(features)
+    joblib.dump(kmeans, "film_kmeans_model.joblib")
+    joblib.dump(title_le, "title_le.joblib")
+    joblib.dump(rating_le, "rating_le.joblib")
+
+    # PCA
+    pca = PCA(n_components=2)
+    X_2d = pca.fit_transform(features)
+    # Find most important features for PCA 1 and PCA 2
+    pca_loadings = pca.components_
+    pc1_importances = np.abs(pca_loadings[0])
+    pc2_importances = np.abs(pca_loadings[1])
+    pc1_top_idx = np.argmax(pc1_importances)
+    pc2_top_idx = np.argmax(pc2_importances)
+
+    pc1_feature = feature_names[pc1_top_idx]
+    pc2_feature = feature_names[pc2_top_idx]
+
+    plt.figure(figsize=(8,6))
+    scatter = plt.scatter(X_2d[:,0], X_2d[:,1], c=labels, cmap='viridis')
+    plt.xlabel(f'PCA 1:  {pc1_feature}')
+    plt.ylabel(f'PCA 2:  {pc2_feature}')
+    plt.title("Film Cluster Visualization")
+    plt.colorbar(scatter, label='Cluster')
+
+    img_folder = os.path.join(os.path.dirname(__file__), "plt-images")
+    os.makedirs(img_folder, exist_ok=True)
+    img_path = os.path.join(img_folder, "film_clusters.png")
+    plt.savefig(img_path, bbox_inches='tight')
+    plt.close()
+
+    # Also return actual loadings for full transparency
+    return {
+        "message": "Model trained + cluster plot image saved.",
+        "n_films": len(films),
+        "cluster_plot": img_path,
+        "pca_main_features": {
+            "PCA1": {
+                "feature": pc1_feature,
+                "weight": float(pca_loadings[0][pc1_top_idx])
+            },
+            "PCA2": {
+                "feature": pc2_feature,
+                "weight": float(pca_loadings[1][pc2_top_idx])
+            }
+        }
+    }, 200
+
+
+@films_router.get('/predict-cluster/<film_id>')
+def predict_film_cluster(film_id):
+    film = Film.query.get(film_id)
+    if film is None:
+        return {"error": "Film not found"}, 404
+    kmeans = joblib.load("film_kmeans_model.joblib")
+    title_le = joblib.load("title_le.joblib")
+    rating_le = joblib.load("rating_le.joblib")
+    title_num = title_le.transform([film.title])[0]
+    rating_num = rating_le.transform([film.rating])[0]
+    feature = np.array([
+        [
+            film.release_year,
+            film.rental_duration,
+            film.rental_rate,
+            film.length,
+            film.replacement_cost,
+            title_num,
+            rating_num
+        ]
+    ])
+    cluster = int(kmeans.predict(feature)[0])
+    return jsonify({
+        "film_id": film_id,
+        "title": film.title,
+        "cluster": cluster
+    })
+
+
+@films_router.get('/recommend-like/<film_id>')
+def recommend_similar_films(film_id):
+    film = Film.query.get(film_id)
+    if film is None:
+        return {"error": "Film not found"}, 404
+
+    # Load encoders and model
+    kmeans = joblib.load("film_kmeans_model.joblib")
+    title_le = joblib.load("title_le.joblib")
+    rating_le = joblib.load("rating_le.joblib")
+
+    title_num = title_le.transform([film.title])[0]  # extract scalar
+    rating_num = rating_le.transform([film.rating])[0]  # extract scalar
+
+    feature = np.array([[
+        film.release_year,
+        film.rental_duration,
+        film.rental_rate,
+        film.length,
+        film.replacement_cost,
+        title_num,
+        rating_num
+    ]])
+
+    cluster = int(kmeans.predict(feature)[0])
+
+    # Get all films and their clusters
+    films = Film.query.all()
+    titles_all = [f.title for f in films]
+    ratings_all = [f.rating for f in films]
+    titles_num = title_le.transform(titles_all)
+    ratings_num = rating_le.transform(ratings_all)
+
+    features = np.array([
+        [
+            f.release_year,
+            f.rental_duration,
+            f.rental_rate,
+            f.length,
+            f.replacement_cost,
+            titles_num[i],
+            ratings_num[i]
+        ]
+        for i, f in enumerate(films)
+    ])
+    clusters_all = kmeans.predict(features)
+
+    # Get films with the same cluster but different ID
+    same_cluster_films = [f for i, f in enumerate(films) if clusters_all[i] == cluster and f.film_id != film.film_id]
+
+    recommends = random.sample(same_cluster_films, min(5, len(same_cluster_films)))
+
+    return {
+        "film_id": film_id,
+        "title": film.title,
+        "cluster": cluster,
+        "recommendations": [
+            {
+                "film_id": f.film_id,
+                "title": f.title
+            } for f in recommends
+        ]
+    }, 200

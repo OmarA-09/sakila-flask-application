@@ -5,3 +5,8 @@ flask-marshmallow
 marshmallow-sqlalchemy
 flask-cors
 dotenv
+
+scikit-learn
+matplotlib
+joblib
+numpy
